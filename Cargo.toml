@@ -1,0 +1,39 @@
+[package]
+name = "actix-loginmanager"
+version = "0.0.1"
+edition = "2018"
+keywords = ["http", "web", "framework", "async", "actix", "loginmanager"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "actix_loginmanager"
+path = "src/lib.rs"
+
+
+[dependencies.actix-web]
+version = "^3.0.0"
+default_features = false
+
+[dependencies]
+actix-service = "*"
+actix-http = "*"
+futures = "*"
+futures-core = "*"
+futures-util="*"
+actix-rt = "1.0"
+serde = "*"
+serde_json = "*"
+rust-crypto = "^0.2"
+
+[dev.dependencies]
+actix-rt = "1.0"
+
+[features]
+cookie-session = ["actix-web/secure-cookies"]
+default = ["cookie-session"]
+
+[dependencies.time]
+version = "0.2.23"
+features = ["std"]
+default-features = false
