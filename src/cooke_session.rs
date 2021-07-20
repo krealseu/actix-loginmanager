@@ -1,24 +1,14 @@
+use actix_web::http::{header, header::SET_COOKIE, HeaderValue};
 use actix_web::HttpMessage;
 use actix_web::{
-    dev::{Extensions, Payload, ServiceRequest, ServiceResponse},
-    http::header::HeaderMap,
-    web, App, Either, Error, FromRequest, HttpRequest, HttpResponse, HttpServer, Responder,
+    dev::{ServiceRequest, ServiceResponse},
+    HttpRequest, HttpResponse,
 };
-use actix_web::http::{header::SET_COOKIE, header, HeaderValue};
 
-use core::cell::RefCell;
-use futures::{
-    future::{ok, Ready},
-    future,
-    Future,
-};
-use std::pin::Pin;
-use std::rc::Rc;
-use std::task::{Context, Poll};
 use time::{Duration, OffsetDateTime};
 
-use serde::{Serialize,Deserialize};
-use actix_web::cookie::{Cookie, CookieJar, SameSite,Key};
+use actix_web::cookie::{Cookie, CookieJar, Key, SameSite};
+use serde::{Deserialize, Serialize};
 
 use crypto::sha2::Sha512;
 
@@ -26,13 +16,8 @@ use crypto::digest::Digest;
 
 use crate::loginmanager::DecodeRequest;
 
-enum CookieSecurity {
-    Signed,
-    Private,
-}
-
-pub struct CookieSession{
-    security: CookieSecurity,
+/// use cookie as session to storage the info of user key.
+pub struct CookieSession {
     key: Key,
     name: String,
     path: String,
@@ -46,9 +31,8 @@ pub struct CookieSession{
 
 fn __create_identifier(request: &ServiceRequest) -> String {
     let mut sha512 = Sha512::new();
-    if let Some(addr) =
-        actix_web::dev::ConnectionInfo::get(request.head(), request.app_config())
-            .realip_remote_addr()
+    if let Some(addr) = actix_web::dev::ConnectionInfo::get(request.head(), request.app_config())
+        .realip_remote_addr()
     {
         if let Some(ip) = addr.split(":").next() {
             sha512.input_str(ip);
@@ -64,9 +48,8 @@ fn __create_identifier(request: &ServiceRequest) -> String {
 
 fn _create_identifier(request: &HttpRequest) -> String {
     let mut sha512 = Sha512::new();
-    if let Some(addr) =
-        actix_web::dev::ConnectionInfo::get(request.head(), request.app_config())
-            .realip_remote_addr()
+    if let Some(addr) = actix_web::dev::ConnectionInfo::get(request.head(), request.app_config())
+        .realip_remote_addr()
     {
         if let Some(ip) = addr.split(":").next() {
             sha512.input_str(ip);
@@ -80,16 +63,15 @@ fn _create_identifier(request: &HttpRequest) -> String {
     return sha512.result_str();
 }
 
-#[derive(Serialize,Deserialize)]
-struct Session{
-    id:String,
-    user_id:Option<String>
+#[derive(Serialize, Deserialize)]
+struct Session {
+    id: String,
+    user_id: Option<String>,
 }
 
-impl CookieSession{
-    pub fn new(key: &[u8])->Self{
-        Self{
-            security: CookieSecurity::Private,
+impl CookieSession {
+    pub fn new(key: &[u8]) -> Self {
+        Self {
             key: Key::derive_from(key),
             name: "_session".to_owned(),
             path: "/".to_owned(),
@@ -102,53 +84,48 @@ impl CookieSession{
         }
     }
 
-    pub fn name(mut self,name:&'static str)->Self{
+    pub fn name(mut self, name: &'static str) -> Self {
         self.name = name.to_owned();
         self
     }
 
-    pub fn secure(mut self,secure:bool)->Self{
+    pub fn secure(mut self, secure: bool) -> Self {
         self.secure = secure;
         self
     }
 
-    pub fn http_only(mut self,http_only:bool)->Self{
+    pub fn http_only(mut self, http_only: bool) -> Self {
         self.http_only = http_only;
         self
     }
 
-    pub fn domain(mut self,domain:Option<String>)->Self{
+    pub fn domain(mut self, domain: Option<String>) -> Self {
         self.domain = domain;
         self
     }
 
-    pub fn max_age(mut self,max_age:Option<Duration>)->Self{
+    pub fn max_age(mut self, max_age: Option<Duration>) -> Self {
         self.max_age = max_age;
         self
     }
 
-    pub fn expires_in(mut self,expires_in:Option<Duration>)->Self{
+    pub fn expires_in(mut self, expires_in: Option<Duration>) -> Self {
         self.expires_in = expires_in;
         self
     }
 
-    pub fn same_site(mut self,same_site:Option<SameSite>)->Self{
+    pub fn same_site(mut self, same_site: Option<SameSite>) -> Self {
         self.same_site = same_site;
         self
     }
-
 }
 
 impl DecodeRequest for CookieSession {
-
     fn decode(&self, req: &ServiceRequest) -> Option<String> {
-        if let Some(cookie) = req.cookie(&self.name){
+        if let Some(cookie) = req.cookie(&self.name) {
             let mut jar = CookieJar::new();
             jar.add_original(cookie.clone());
-            let cookie_opt = match self.security {
-                CookieSecurity::Signed => jar.signed(&self.key).get(&self.name),
-                CookieSecurity::Private => jar.private(&self.key).get(&self.name)
-            };
+            let cookie_opt = jar.private(&self.key).get(&self.name);
             if let Some(cookie) = cookie_opt {
                 if let Ok(val) = serde_json::from_str::<Session>(cookie.value()) {
                     if val.id == __create_identifier(&req) {
@@ -160,20 +137,19 @@ impl DecodeRequest for CookieSession {
         None
     }
 
-
-    fn update_<B>(&self, key: Option<String> ,res: &mut ServiceResponse<B>) -> Result<(),()>{
-        let key = match key{
-            Some(x) if x=="".to_owned() =>None,
-            Some(key)=>Some(key),
-            _=> return Err(())
+    fn update_<B>(&self, key: Option<String>, res: &mut ServiceResponse<B>) -> Result<(), ()> {
+        let key = match key {
+            Some(x) if x == "".to_owned() => None,
+            Some(key) => Some(key),
+            _ => return Ok(()),
         };
 
-        let session = Session{
-            id:_create_identifier(res.request()),
-            user_id:key
+        let session = Session {
+            id: _create_identifier(res.request()),
+            user_id: key,
         };
 
-        let value = serde_json::to_string(&session).map_err(|_|())?;
+        let value = serde_json::to_string(&session).map_err(|_| ())?;
 
         let mut cookie = Cookie::new(self.name.clone(), value);
 
@@ -199,13 +175,10 @@ impl DecodeRequest for CookieSession {
 
         let mut jar = CookieJar::new();
 
-        match self.security {
-            CookieSecurity::Signed => jar.signed(&self.key).add(cookie),
-            CookieSecurity::Private => jar.private(&self.key).add(cookie),
-        }
+        jar.private(&self.key).add(cookie);
 
         for cookie in jar.delta() {
-            let val = HeaderValue::from_str(&cookie.encoded().to_string()).map_err(|_|())?;
+            let val = HeaderValue::from_str(&cookie.encoded().to_string()).map_err(|_| ())?;
             res.headers_mut().append(SET_COOKIE, val);
         }
 

@@ -1,26 +1,22 @@
 use crate::loginmanager::{KeyState, KeyWrap};
+use actix_http::error::ErrorUnauthorized;
 use actix_web::{
     dev::{Extensions, Payload, ServiceRequest, ServiceResponse},
     http::header,
-    web, App, Either, Error, FromRequest, HttpRequest, HttpResponse, HttpServer, Responder,
+    Error, FromRequest, HttpRequest, HttpResponse, HttpServer,
 };
-use core::cell::RefCell;
-use futures::{
-    future,
-    future::{ok, Ready},
-    Future,
-};
+use futures::Future;
+use serde::{de::DeserializeOwned, Serialize};
 use std::pin::Pin;
 use std::rc::Rc;
 
-use serde::{de::DeserializeOwned, Serialize};
-
-pub trait UserMinix<K>: Sized {
+pub trait UserMinix: Sized {
     type Future: Future<Output = Option<Self>>;
+    type Key: Serialize + DeserializeOwned;
 
-    fn get_user(id: &K, req: &HttpRequest) -> Self::Future;
+    fn get_user(id: &Self::Key, req: &HttpRequest) -> Self::Future;
 
-    fn get_id(&self) -> K;
+    fn get_id(&self) -> Self::Key;
 
     fn is_authenticated(&self) -> bool {
         true
@@ -31,116 +27,69 @@ pub trait UserMinix<K>: Sized {
     }
 }
 
-struct Inner<K, U>
-where
-    U: UserMinix<K>,
-    K: Serialize + DeserializeOwned,
-{
-    id: Option<K>,
-    user: Option<U>,
-}
+/// User instance
+pub struct UserWrap<T>(pub Rc<T>);
 
-pub struct User<K, U>(Rc<Inner<K, U>>)
-where
-    U: UserMinix<K>,
-    K: Serialize + DeserializeOwned;
-
-impl<K, U> Default for User<K, U>
-where
-    U: UserMinix<K>,
-    K: Serialize + DeserializeOwned,
-{
-    fn default() -> Self {
-        Self(Rc::new(Inner {
-            id: None,
-            user: None,
-            // state: State::Ok,
-        }))
+impl<T> Clone for UserWrap<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 
-impl<K: 'static, U: 'static> User<K, U>
+impl<T: 'static> UserWrap<T>
 where
-    U: UserMinix<K>,
-    K: Serialize + DeserializeOwned,
+    T: UserMinix,
 {
-    pub fn new(user: U) -> Self {
-        Self(Rc::new(Inner {
-            id: None,
-            user: Some(user),
-            // state: State::Ok,
-        }))
+    pub fn new(user: T) -> Self {
+        Self(Rc::new(user))
     }
 
-    pub fn get_id(&self) -> Option<K> {
-        if let Some(user) = &self.0.user {
-            Some(user.get_id())
-        } else {
-            None
-        }
-    }
-
-    pub fn user(&self) -> Option<&U> {
-        self.0.user.as_ref()
-    }
-
-    pub fn is_authenticated(&self) -> bool {
-        if let Some(user) = self.user() {
-            user.is_authenticated()
-        }else{
-            false
-        }
-    }
-
-    pub fn login(&self, req: &HttpRequest) {
-        let mut extensions = req.extensions_mut();
-        extensions.insert(KeyWrap {
-            key: self.get_id(),
-            state: KeyState::Login,
-        });
-    }
-
-    pub fn logout(&self, req: &HttpRequest) {
-        let mut extensions = req.extensions_mut();
-        extensions.insert(KeyWrap {
-            key: self.get_id(),
-            state: KeyState::Logout,
-        });
-    }
-
-    async fn get_user_from_req(req: &HttpRequest) -> Self {
-        let mut extensions = req.extensions_mut();
-        if let Some(user) = extensions.get::<Rc<Inner<K, U>>>() {
-            return User(user.clone());
-        } else {
-            let mut user = Self::default();
-            if let Some(keywrap) = extensions.get::<KeyWrap<K>>() {
-                if let Some(id) = &keywrap.key {
-                    let real_user = U::get_user(&id, req).await;
-                    user = User(Rc::new(Inner {
-                        id: None,
-                        user: real_user,
-                        // state: State::Pending,
-                    }))
-                };
-            };
-            extensions.insert(User(user.0.clone()));
-            return user;
-        }
+    pub fn user(&self) -> &T {
+        self.0.as_ref()
     }
 }
 
-impl<K: 'static, U: 'static> FromRequest for User<K, U>
+impl<U> From<U> for UserWrap<U> {
+    fn from(u: U) -> Self {
+        UserWrap(Rc::new(u))
+    }
+}
+
+impl<U> AsRef<U> for UserWrap<U> {
+    fn as_ref(&self) -> &U {
+        self.0.as_ref()
+    }
+}
+
+impl<T: 'static> FromRequest for UserWrap<T>
 where
-    U: UserMinix<K>,
-    K: Serialize + DeserializeOwned,
+    T: UserMinix,
 {
     type Error = Error;
-    type Future = future::LocalBoxFuture<'static, Result<Self, Self::Error>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
+
     type Config = ();
     #[inline]
     fn from_request(req: &HttpRequest, _: &mut Payload) -> Self::Future {
         let req_clone: HttpRequest = req.clone();
-        Box::pin(async move { Ok(User::get_user_from_req(&req_clone).await) })
+        Box::pin(async move {
+            let extensions = &mut req_clone.extensions_mut();
+            if let Some(user) = extensions.get::<Self>() {
+                return Ok(user.clone());
+            } else {
+                if let Some(keywrap) = extensions.get::<KeyWrap<T::Key>>() {
+                    if let Some(id) = &keywrap.key {
+                        let real_user = T::get_user(&id, &req_clone).await;
+                        if let Some(real_user) = real_user {
+                            let user = UserWrap(Rc::new(real_user));
+                            extensions.insert(user.clone());
+                            return Ok(user);
+                        } else {
+                        }
+                    };
+                };
+            };
+            return Err(ErrorUnauthorized("No authentication."));
+        })
     }
 }

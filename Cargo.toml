@@ -1,6 +1,6 @@
 [package]
 name = "actix-loginmanager"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2018"
 keywords = ["http", "web", "actix", "loginmanager"]
 description = "a loginmanager for actix-web"

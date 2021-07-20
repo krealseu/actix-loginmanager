@@ -1,7 +1,11 @@
+use actix_http::error::ErrorBadRequest;
 use actix_service::{Service, Transform};
 use actix_web::HttpMessage;
 use actix_web::{
     dev::{ServiceRequest, ServiceResponse},
+    http,
+    http::header::HeaderValue,
+    http::header::LOCATION,
     Error, HttpResponse,
 };
 use futures::{
@@ -28,12 +32,25 @@ pub enum KeyState {
     Ok,
 }
 
+/// The Wrap of key ,storage in request extensions
 pub struct KeyWrap<I>
 where
     I: Serialize + DeserializeOwned,
 {
     pub key: Option<I>,
     pub state: KeyState,
+}
+
+impl<I> KeyWrap<I>
+where
+    I: Serialize + DeserializeOwned,
+{
+    pub fn new(key: I, state: KeyState) -> Self {
+        Self {
+            key: Some(key),
+            state,
+        }
+    }
 }
 
 struct Inner<I, D>
@@ -43,19 +60,13 @@ where
 {
     key: Option<I>,
     decoder: D,
-    login_view: String,
+    login_view: HeaderValue,
+    redirect: bool,
 }
 
-impl<I, D> Inner<I, D>
-where
-    I: Serialize + DeserializeOwned,
-    D: DecodeRequest,
-{
-    // fn from_request(&self, req: &ServiceRequest)->Option<I>{
-    //     None
-    // }
-}
-
+/// LoginManager<I, D> is implemented as a middleware.   
+/// I the type of user key.  
+/// D the type of DecodeRequest. It decode the key_string from request.  
 pub struct LoginManager<I, D>(Rc<Inner<I, D>>)
 where
     I: Serialize + DeserializeOwned,
@@ -73,8 +84,20 @@ where
         Self(Rc::new(Inner {
             key: None,
             decoder,
-            login_view: "/login".to_owned(),
+            login_view: HeaderValue::from_str("/login").unwrap(),
+            redirect: true,
         }))
+    }
+
+    /// set false, not redirect when user is not authenticated,default true.
+    pub fn redirect(mut self, redirect: bool) -> Self {
+        Rc::get_mut(&mut self.0).unwrap().redirect = redirect;
+        self
+    }
+
+    pub fn login_view(mut self, login_view: String) -> Self {
+        Rc::get_mut(&mut self.0).unwrap().login_view = HeaderValue::from_str(&login_view).unwrap();
+        self
     }
 }
 
@@ -140,11 +163,9 @@ where
                 }
                 _ => {
                     return Box::pin(async move {
-                        HttpResponse::Ok().finish();
-                        let res: actix_http::Response = HttpResponse::BadRequest()
-                            .body("Authentication information is not given in the correct format.")
-                            .into();
-                        Ok(req.error_response(Error::from(res)))
+                        Err(ErrorBadRequest(
+                            "Authentication information is not given in the correct format.",
+                        ))
                     });
                 }
             }
@@ -152,28 +173,50 @@ where
         let fut = self.service.call(req);
         Box::pin(async move {
             let res = fut.await.map(|mut res| {
-                let mut key = if let Some(key) = res.request().extensions().get::<KeyWrap<I>>() {
-                    match key {
-                        KeyWrap {
-                            key: Some(key),
-                            state: KeyState::Login | KeyState::Update,
-                        } => {
-                            if let Ok(key) = serde_json::to_string(key) {
-                                Some(key)
-                            } else {
-                                None
+                let key: Option<String> =
+                    if let Some(key) = res.request().extensions().get::<KeyWrap<I>>() {
+                        match key {
+                            KeyWrap {
+                                key: Some(key),
+                                state: KeyState::Login | KeyState::Update,
+                            } => {
+                                if let Ok(key) = serde_json::to_string(key) {
+                                    Some(key)
+                                } else {
+                                    None
+                                }
                             }
+                            KeyWrap {
+                                key: _,
+                                state: KeyState::Logout,
+                            } => Some("".to_owned()),
+                            _ => None,
                         }
-                        KeyWrap {
-                            key: _,
-                            state: KeyState::Logout,
-                        } => Some("".to_owned()),
-                        _ => None,
+                    } else {
+                        None
+                    };
+                inner.decoder.update_(key, &mut res).unwrap();
+                if inner.redirect && res.status().as_u16() == 401 {
+                    res.response_mut().head_mut().status = http::StatusCode::FOUND;
+                    let mut path = String::new();
+                    let req = res.request();
+                    if inner.redirect {
+                        path.push_str(req.path());
+                        if req.query_string().len() > 0 {
+                            path.push_str("%3F");
+                            path.push_str(
+                                &req.query_string().replace("&", "%26").replace("=", "%3d"),
+                            );
+                        }
                     }
-                } else {
-                    None
+                    let headervalue = if path.len() > 0 {
+                        let url = format!("{}?next={}", inner.login_view.to_str().unwrap(), path);
+                        HeaderValue::from_str(&url).unwrap()
+                    } else {
+                        inner.login_view.clone()
+                    };
+                    res.headers_mut().insert(LOCATION, headervalue);
                 };
-                inner.decoder.update_(key, &mut res);
                 res
             })?;
             Ok(res)
