@@ -9,25 +9,69 @@ use futures::Future;
 use serde::{de::DeserializeOwned, Serialize};
 use std::pin::Pin;
 use std::rc::Rc;
-
+/// the base user trait
+/// ### Example: Get user from database
+/// ```rust
+/// type Pool = sqlx::SqlitePool;
+///
+/// #[derive(Serialize, Deserialize)]
+/// pub struct User { ... }
+///
+/// impl UserMinix for User {
+///     type Future = Pin<Box<dyn Future<Output = Option<Self>>>>;
+///     type Key = i32;
+///     fn get_user(id: &i32, req: &HttpRequest) -> Self::Future {
+///         let req = req.clone();
+///         let id = id.clone();
+///         Box::pin(async move {
+///             if let Some(pool) = req.app_data::<Data<Pool>>(){
+///                 let pool = pool.get_ref();  
+///                 todo!()   // get user from pool instance,return Some(user) or None
+///             }else{
+///                 None
+///             }
+///         })
+///     }
+///     fn get_id(&self) -> i32 {
+///         self.id
+///     }
+/// }
+/// ```
 pub trait UserMinix: Sized {
+    ///
     type Future: Future<Output = Option<Self>>;
+
+    /// The type of User, must be same as Loginmanager.
+    /// Otherwise no user will be returned.
     type Key: Serialize + DeserializeOwned;
 
+    /// Get user from id and req,Tip:can use req.app_data to obtain
+    /// database connection defined in Web app.
     fn get_user(id: &Self::Key, req: &HttpRequest) -> Self::Future;
 
+    /// Return the User id
     fn get_id(&self) -> Self::Key;
 
+    /// return user's actual authentication status, default True.
     fn is_authenticated(&self) -> bool {
         true
     }
 
+    /// return user's actual active status, default True.
     fn is_atived(&self) -> bool {
         true
     }
 }
 
-/// User instance
+/// The wrap of user Instance. It implements `FromRequest` trait.  
+/// It will return `401 Unauthorized` if no key or error key.  
+/// If loginmanager set redirect true,then will rediret login_view. 
+/// ```rust
+/// #[get("/index")]
+/// async fn index(UserWrap(user): UserWrap<User>) -> impl Responder{
+///     todo()!
+/// }
+/// ```
 pub struct UserWrap<T>(pub Rc<T>);
 
 impl<T> Clone for UserWrap<T> {
