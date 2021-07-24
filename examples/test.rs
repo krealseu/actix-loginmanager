@@ -4,6 +4,7 @@ use actix_loginmanager as loginmanager;
 use loginmanager::{CookieSession, LoginManager, UserMinix, UserWrap};
 
 use futures::{future, future::Ready};
+use loginmanager_codegen::login_required;
 
 #[derive(Clone)]
 struct User {
@@ -33,6 +34,11 @@ const USERS: [User; 3] = [
     User { id: 2, name: "Jerry" },
     User { id: 3, name: "Spike" },
 ];
+
+#[login_required(User)]
+async fn hello()->impl actix_web::Responder{
+    return "hello";
+}
 
 #[actix_web::main]
 async fn main() {
@@ -68,6 +74,7 @@ async fn main() {
                     HttpResponse::Ok().body(format!("logout:{:?} ", user.name))
                 }),
             )
+            .route("/hello", web::get().to(hello))
     })
     .bind("0.0.0.0:7081")
     .unwrap()

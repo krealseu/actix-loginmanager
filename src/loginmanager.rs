@@ -65,8 +65,8 @@ where
 }
 
 /// LoginManager<I, D> is implemented as a middleware.   
-/// I the type of user key.  
-/// D the type of DecodeRequest. It decode the key_string from request.  
+/// - `I` the type of user key.  
+/// - `D` the type of DecodeRequest. It decode the key_string from request.  
 pub struct LoginManager<I, D>(Rc<Inner<I, D>>)
 where
     I: Serialize + DeserializeOwned,

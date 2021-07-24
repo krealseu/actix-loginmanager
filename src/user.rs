@@ -58,7 +58,7 @@ pub trait UserMinix: Sized {
     }
 
     /// return user's actual active status, default True.
-    fn is_atived(&self) -> bool {
+    fn is_actived(&self) -> bool {
         true
     }
 }
@@ -134,6 +134,45 @@ where
                 };
             };
             return Err(ErrorUnauthorized("No authentication."));
+        })
+    }
+}
+
+/// The wrap of userwrap Instance. It will check if the user is actived and authenticated
+pub struct UserWrapAuth<U>(pub UserWrap<U>);
+
+impl<U> From<U> for UserWrapAuth<U> {
+    fn from(u: U) -> Self {
+        UserWrapAuth(UserWrap(Rc::new(u)))
+    }
+}
+
+impl<U> AsRef<U> for UserWrapAuth<U> {
+    fn as_ref(&self) -> &U {
+        self.0.0.as_ref()
+    }
+}
+
+impl<U: 'static> FromRequest for UserWrapAuth<U>
+where
+    U: UserMinix,
+{
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
+
+    type Config = ();
+    #[inline]
+    fn from_request(req: &HttpRequest, pl: &mut Payload) -> Self::Future {
+        let userwrap_future = UserWrap::from_request(req,pl);
+        Box::pin(async move {
+            let userwrap = userwrap_future.await?;
+            let userwrapauth = Self(userwrap);
+            let user = userwrapauth.as_ref();
+            if user.is_actived() && user.is_authenticated(){
+                return Ok(userwrapauth);
+            }else{
+                return Err(ErrorUnauthorized("No authentication."));
+            }
         })
     }
 }

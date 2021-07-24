@@ -1,0 +1,16 @@
+[package]
+name = "loginmanager-codegen"
+version = "0.0.1"
+edition = "2018"
+keywords = ["web", "actix", "loginmanager", "marco"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/krealseu/actix-loginmanager"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1"
+syn = { version = "1", features = ["full", "parsing"] }
+proc-macro2 = "1"

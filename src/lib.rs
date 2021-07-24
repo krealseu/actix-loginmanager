@@ -6,6 +6,7 @@
 //! 
 //! use actix_loginmanager as loginmanager;
 //! use loginmanager::{CookieSession, LoginManager, UserMinix, UserWrap};
+//! use loginmanager_codegen::login_required;
 //! 
 //! use futures::{future, future::Ready};
 //! 
@@ -37,6 +38,11 @@
 //!     User { id: 2, name: "Jerry" },
 //!     User { id: 3, name: "Spike" },
 //! ];
+//! 
+//! #[login_required(User)]
+//! async fn hello()->impl actix_web::Responder{
+//!     return "hello";
+//! }
 //! 
 //! #[actix_web::main]
 //! async fn main() {
@@ -72,6 +78,7 @@
 //!                     HttpResponse::Ok().body(format!("logout:{:?} ", user.name))
 //!                 }),
 //!             )
+//!             .route("/hello", web::get().to(hello))
 //!     })
 //!     .bind("0.0.0.0:7081")
 //!     .unwrap()
@@ -86,7 +93,8 @@ mod loginmanager;
 mod user;
 pub use crate::cooke_session::CookieSession;
 pub use crate::loginmanager::{DecodeRequest, KeyState, KeyWrap, LoginManager};
-pub use crate::user::{UserMinix, UserWrap};
+pub use crate::user::{UserMinix, UserWrap, UserWrapAuth};
+pub use loginmanager_codegen::login_required;
 
 /// The method of user login
 pub fn login<U>(user: &dyn AsRef<U>, req: &actix_web::HttpRequest)
