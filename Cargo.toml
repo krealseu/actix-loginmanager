@@ -29,7 +29,7 @@ actix-rt = "1.0"
 serde = "^1.0"
 serde_json = "^1.0"
 rust-crypto = "^0.2"
-loginmanager-codegen = { path = "loginmanager-codegen" }
+loginmanager-codegen = { version="^0.0.1", path = "loginmanager-codegen" }
 
 [features]
 cookie-session = ["actix-web/secure-cookies"]
