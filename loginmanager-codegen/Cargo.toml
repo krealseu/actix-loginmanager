@@ -1,5 +1,6 @@
 [package]
 name = "loginmanager-codegen"
+description = "The macro for actix-loginmanager"
 version = "0.0.1"
 edition = "2018"
 keywords = ["web", "actix", "loginmanager", "marco"]
