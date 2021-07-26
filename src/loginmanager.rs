@@ -1,4 +1,3 @@
-use actix_http::error::ErrorBadRequest;
 use actix_service::{Service, Transform};
 use actix_web::HttpMessage;
 use actix_web::{
@@ -16,65 +15,50 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
 
-use serde::{de::DeserializeOwned, Serialize};
-
 pub trait DecodeRequest: Sized {
     fn decode(&self, req: &ServiceRequest) -> Option<String>;
-    fn update_<B>(&self, key: Option<String>, header: &mut ServiceResponse<B>) -> Result<(), ()> {
+    fn update_<B>(&self, res: &mut ServiceResponse<B>) -> Result<(), Error> {
         Ok(())
     }
 }
 
-pub enum KeyState {
+pub enum LoginState {
     Login,
     Logout,
     Update,
     Ok,
+    Wait,
+    Err,
 }
 
-/// The Wrap of key ,storage in request extensions
-pub struct KeyWrap<I>
-where
-    I: Serialize + DeserializeOwned,
-{
-    pub key: Option<I>,
-    pub state: KeyState,
+pub struct LoginInfo {
+    pub key_str: Option<String>,
+    pub state: LoginState,
 }
 
-impl<I> KeyWrap<I>
-where
-    I: Serialize + DeserializeOwned,
-{
-    pub fn new(key: I, state: KeyState) -> Self {
-        Self {
-            key: Some(key),
-            state,
-        }
+impl LoginInfo {
+    pub fn new(key_str: Option<String>, state: LoginState) -> Self {
+        Self { key_str, state }
     }
 }
 
-struct Inner<I, D>
+struct Inner<D>
 where
-    I: Serialize + DeserializeOwned,
     D: DecodeRequest,
 {
-    key: Option<I>,
     decoder: D,
     login_view: HeaderValue,
     redirect: bool,
 }
 
-/// LoginManager<I, D> is implemented as a middleware.   
-/// - `I` the type of user key.  
+/// LoginManager<D> is implemented as a middleware.   
 /// - `D` the type of DecodeRequest. It decode the key_string from request.  
-pub struct LoginManager<I, D>(Rc<Inner<I, D>>)
+pub struct LoginManager<D>(Rc<Inner<D>>)
 where
-    I: Serialize + DeserializeOwned,
     D: DecodeRequest;
 
-impl<I, D> LoginManager<I, D>
+impl<D> LoginManager<D>
 where
-    I: Serialize + DeserializeOwned,
     D: DecodeRequest,
 {
     pub fn new(decoder: D) -> Self
@@ -82,7 +66,6 @@ where
         D: DecodeRequest,
     {
         Self(Rc::new(Inner {
-            key: None,
             decoder,
             login_view: HeaderValue::from_str("/login").unwrap(),
             redirect: true,
@@ -95,25 +78,25 @@ where
         self
     }
 
+    /// set the login url redirect, default '/login'.
     pub fn login_view(mut self, login_view: String) -> Self {
         Rc::get_mut(&mut self.0).unwrap().login_view = HeaderValue::from_str(&login_view).unwrap();
         self
     }
 }
 
-impl<S, B, I: 'static, D: 'static> Transform<S> for LoginManager<I, D>
+impl<S, B, D: 'static> Transform<S> for LoginManager<D>
 where
     S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
     B: 'static,
-    I: Serialize + DeserializeOwned,
     D: DecodeRequest,
 {
     type Request = ServiceRequest;
     type Response = ServiceResponse<B>;
     type Error = Error;
     type InitError = ();
-    type Transform = LoginManagerMiddleware<S, I, D>;
+    type Transform = LoginManagerMiddleware<S, D>;
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
@@ -124,21 +107,19 @@ where
     }
 }
 
-pub struct LoginManagerMiddleware<S, I, D>
+pub struct LoginManagerMiddleware<S, D>
 where
-    I: Serialize + DeserializeOwned,
     D: DecodeRequest,
 {
     service: S,
-    inner: Rc<Inner<I, D>>,
+    inner: Rc<Inner<D>>,
 }
 
-impl<S, B, I: 'static, D: 'static> Service for LoginManagerMiddleware<S, I, D>
+impl<S, B, D: 'static> Service for LoginManagerMiddleware<S, D>
 where
     S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
     B: 'static,
-    I: Serialize + DeserializeOwned,
     D: DecodeRequest,
 {
     type Request = ServiceRequest;
@@ -153,49 +134,12 @@ where
     fn call(&mut self, req: ServiceRequest) -> Self::Future {
         let inner = self.inner.clone();
         let key_str = inner.decoder.decode(&req);
-        if let Some(key_str) = key_str {
-            match serde_json::from_str::<I>(&key_str) {
-                Ok(key) => {
-                    req.extensions_mut().insert(KeyWrap {
-                        key: Some(key),
-                        state: KeyState::Ok,
-                    });
-                }
-                _ => {
-                    return Box::pin(async move {
-                        Err(ErrorBadRequest(
-                            "Authentication information is not given in the correct format.",
-                        ))
-                    });
-                }
-            }
-        };
+        req.extensions_mut()
+            .insert(LoginInfo::new(key_str, LoginState::Wait));
         let fut = self.service.call(req);
         Box::pin(async move {
             let res = fut.await.map(|mut res| {
-                let key: Option<String> =
-                    if let Some(key) = res.request().extensions().get::<KeyWrap<I>>() {
-                        match key {
-                            KeyWrap {
-                                key: Some(key),
-                                state: KeyState::Login | KeyState::Update,
-                            } => {
-                                if let Ok(key) = serde_json::to_string(key) {
-                                    Some(key)
-                                } else {
-                                    None
-                                }
-                            }
-                            KeyWrap {
-                                key: _,
-                                state: KeyState::Logout,
-                            } => Some("".to_owned()),
-                            _ => None,
-                        }
-                    } else {
-                        None
-                    };
-                inner.decoder.update_(key, &mut res).unwrap();
+                inner.decoder.update_(&mut res);
                 if inner.redirect && res.status().as_u16() == 401 {
                     res.response_mut().head_mut().status = http::StatusCode::FOUND;
                     let mut path = String::new();

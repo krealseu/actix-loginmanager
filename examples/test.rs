@@ -45,7 +45,7 @@ async fn main() {
     HttpServer::new(|| {
         App::new()
             .wrap(
-                LoginManager::<i32, CookieSession>::new(
+                LoginManager::new(
                     CookieSession::new(&[0; 32]).secure(false)
                 ),
             )

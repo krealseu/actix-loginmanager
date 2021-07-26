@@ -1,10 +1,6 @@
-use crate::loginmanager::{KeyState, KeyWrap};
+use crate::loginmanager::LoginInfo;
 use actix_http::error::ErrorUnauthorized;
-use actix_web::{
-    dev::{Extensions, Payload, ServiceRequest, ServiceResponse},
-    http::header,
-    Error, FromRequest, HttpRequest, HttpResponse, HttpServer,
-};
+use actix_web::{dev::Payload, Error, FromRequest, HttpRequest};
 use futures::Future;
 use serde::{de::DeserializeOwned, Serialize};
 use std::pin::Pin;
@@ -65,7 +61,7 @@ pub trait UserMinix: Sized {
 
 /// The wrap of user Instance. It implements `FromRequest` trait.  
 /// It will return `401 Unauthorized` if no key or error key.  
-/// If loginmanager set redirect true,then will rediret login_view. 
+/// If loginmanager set redirect true,then will rediret login_view.
 /// ```rust
 /// #[get("/index")]
 /// async fn index(UserWrap(user): UserWrap<User>) -> impl Responder{
@@ -121,16 +117,22 @@ where
             if let Some(user) = extensions.get::<Self>() {
                 return Ok(user.clone());
             } else {
-                if let Some(keywrap) = extensions.get::<KeyWrap<T::Key>>() {
-                    if let Some(id) = &keywrap.key {
-                        let real_user = T::get_user(&id, &req_clone).await;
-                        if let Some(real_user) = real_user {
-                            let user = UserWrap(Rc::new(real_user));
-                            extensions.insert(user.clone());
-                            return Ok(user);
-                        } else {
+                match extensions.get::<LoginInfo>() {
+                    Some(LoginInfo {
+                        key_str: Some(key_str),
+                        ..
+                    }) => match serde_json::from_str::<T::Key>(&key_str) {
+                        Ok(key) => {
+                            let real_user = T::get_user(&key, &req_clone).await;
+                            if let Some(real_user) = real_user {
+                                let user = UserWrap(Rc::new(real_user));
+                                extensions.insert(user.clone());
+                                return Ok(user);
+                            }
                         }
-                    };
+                        _ => {}
+                    },
+                    _ => {}
                 };
             };
             return Err(ErrorUnauthorized("No authentication."));
@@ -149,7 +151,7 @@ impl<U> From<U> for UserWrapAuth<U> {
 
 impl<U> AsRef<U> for UserWrapAuth<U> {
     fn as_ref(&self) -> &U {
-        self.0.0.as_ref()
+        self.0 .0.as_ref()
     }
 }
 
@@ -163,14 +165,14 @@ where
     type Config = ();
     #[inline]
     fn from_request(req: &HttpRequest, pl: &mut Payload) -> Self::Future {
-        let userwrap_future = UserWrap::from_request(req,pl);
+        let userwrap_future = UserWrap::from_request(req, pl);
         Box::pin(async move {
             let userwrap = userwrap_future.await?;
             let userwrapauth = Self(userwrap);
             let user = userwrapauth.as_ref();
-            if user.is_actived() && user.is_authenticated(){
+            if user.is_actived() && user.is_authenticated() {
                 return Ok(userwrapauth);
-            }else{
+            } else {
                 return Err(ErrorUnauthorized("No authentication."));
             }
         })

@@ -7,7 +7,8 @@ use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer};
  
 use actix_loginmanager as loginmanager;
 use loginmanager::{CookieSession, LoginManager, UserMinix, UserWrap};
- 
+use loginmanager_codegen::login_required;
+
 use futures::{future, future::Ready};
  
 #[derive(Clone)]
@@ -38,13 +39,18 @@ const USERS: [User; 3] = [
     User { id: 2, name: "Jerry" },
     User { id: 3, name: "Spike" },
 ];
+
+#[login_required(User)]
+async fn hello()->impl actix_web::Responder{
+    return "hello";
+}
  
 #[actix_web::main]
 async fn main() {
     HttpServer::new(|| {
         App::new()
             .wrap(
-                LoginManager::<i32, CookieSession>::new(
+                LoginManager::new(
                     CookieSession::new(&[0; 32]).secure(false)
                 ),
             )
@@ -73,6 +79,7 @@ async fn main() {
                     HttpResponse::Ok().body(format!("logout:{:?} ", user.name))
                 }),
             )
+            .route("/hello", web::get().to(hello))
     })
     .bind("0.0.0.0:7081")
     .unwrap()

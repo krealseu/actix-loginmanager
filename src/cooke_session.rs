@@ -2,7 +2,7 @@ use actix_web::http::{header, header::SET_COOKIE, HeaderValue};
 use actix_web::HttpMessage;
 use actix_web::{
     dev::{ServiceRequest, ServiceResponse},
-    HttpRequest, HttpResponse,
+    Error, HttpRequest, HttpResponse,
 };
 
 use time::{Duration, OffsetDateTime};
@@ -14,7 +14,7 @@ use crypto::sha2::Sha512;
 
 use crypto::digest::Digest;
 
-use crate::loginmanager::DecodeRequest;
+use crate::loginmanager::{DecodeRequest, LoginInfo, LoginState};
 
 /// use cookie as session to storage the info of user key.
 pub struct CookieSession {
@@ -137,7 +137,20 @@ impl DecodeRequest for CookieSession {
         None
     }
 
-    fn update_<B>(&self, key: Option<String>, res: &mut ServiceResponse<B>) -> Result<(), ()> {
+    fn update_<B>(&self, res: &mut ServiceResponse<B>) -> Result<(), Error> {
+        let key = match res.request().extensions().get::<LoginInfo>() {
+            Some(LoginInfo {
+                key_str,
+                state: LoginState::Login | LoginState::Update,
+            }) => {
+                key_str.clone()
+            }
+            Some(LoginInfo {
+                state: LoginState::Logout,
+                ..
+            }) => Some("".to_owned()),
+            _ => None,
+        };
         let key = match key {
             Some(x) if x == "".to_owned() => None,
             Some(key) => Some(key),
