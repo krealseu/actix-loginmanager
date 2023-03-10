@@ -1,5 +1,7 @@
 use crate::loginmanager::LoginInfo;
-use actix_http::error::ErrorUnauthorized;
+use actix_http::http::StatusCode;
+use actix_web::HttpMessage;
+use actix_web::error::InternalError;
 use actix_web::{dev::Payload, Error, FromRequest, HttpRequest};
 use futures::Future;
 use serde::{de::DeserializeOwned, Serialize};
@@ -108,7 +110,6 @@ where
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
-    type Config = ();
     #[inline]
     fn from_request(req: &HttpRequest, _: &mut Payload) -> Self::Future {
         let req_clone: HttpRequest = req.clone();
@@ -135,7 +136,7 @@ where
                     _ => {}
                 };
             };
-            return Err(ErrorUnauthorized("No authentication."));
+            return Err(InternalError::new("No authentication.", StatusCode::UNAUTHORIZED).into());
         })
     }
 }
@@ -162,7 +163,6 @@ where
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
-    type Config = ();
     #[inline]
     fn from_request(req: &HttpRequest, pl: &mut Payload) -> Self::Future {
         let userwrap_future = UserWrap::from_request(req, pl);
@@ -173,7 +173,7 @@ where
             if user.is_actived() && user.is_authenticated() {
                 return Ok(userwrapauth);
             } else {
-                return Err(ErrorUnauthorized("No authentication."));
+                return Err(InternalError::new("No authentication.", StatusCode::UNAUTHORIZED).into());
             }
         })
     }

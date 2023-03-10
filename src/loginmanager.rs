@@ -1,11 +1,11 @@
-use actix_service::{Service, Transform};
+use actix_web::dev::{Service, Transform};
 use actix_web::HttpMessage;
 use actix_web::{
     dev::{ServiceRequest, ServiceResponse},
     http,
     http::header::HeaderValue,
     http::header::LOCATION,
-    Error, HttpResponse,
+    Error,
 };
 use futures::{
     future::{ok, Ready},
@@ -72,27 +72,26 @@ where
         }))
     }
 
-    /// set false, not redirect when user is not authenticated,default true.
+    /// Set false, not redirect when user is not authenticated. Default true.
     pub fn redirect(mut self, redirect: bool) -> Self {
         Rc::get_mut(&mut self.0).unwrap().redirect = redirect;
         self
     }
 
-    /// set the login url redirect, default '/login'.
+    /// Set the login url redirect, default '/login'.
     pub fn login_view(mut self, login_view: String) -> Self {
         Rc::get_mut(&mut self.0).unwrap().login_view = HeaderValue::from_str(&login_view).unwrap();
         self
     }
 }
 
-impl<S, B, D: 'static> Transform<S> for LoginManager<D>
+impl<S, B, D: 'static> Transform<S, ServiceRequest> for LoginManager<D>
 where
-    S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
     B: 'static,
     D: DecodeRequest,
 {
-    type Request = ServiceRequest;
     type Response = ServiceResponse<B>;
     type Error = Error;
     type InitError = ();
@@ -115,23 +114,22 @@ where
     inner: Rc<Inner<D>>,
 }
 
-impl<S, B, D: 'static> Service for LoginManagerMiddleware<S, D>
+impl<S, B, D: 'static> Service<ServiceRequest> for LoginManagerMiddleware<S, D>
 where
-    S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
     B: 'static,
     D: DecodeRequest,
 {
-    type Request = ServiceRequest;
     type Response = ServiceResponse<B>;
     type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, req: ServiceRequest) -> Self::Future {
+    fn call(&self, req: ServiceRequest) -> Self::Future {
         let inner = self.inner.clone();
         let key_str = inner.decoder.decode(&req);
         req.extensions_mut()

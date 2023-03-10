@@ -1,14 +1,15 @@
-use actix_web::http::{header, header::SET_COOKIE, HeaderValue};
+use actix_http::http::HeaderValue;
+use actix_web::http::{header, header::SET_COOKIE};
 use actix_web::HttpMessage;
 use actix_web::{
     dev::{ServiceRequest, ServiceResponse},
-    Error, HttpRequest, HttpResponse,
+    Error, HttpRequest,
 };
 
+use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
 
 use actix_web::cookie::{Cookie, CookieJar, Key, SameSite};
-use serde::{Deserialize, Serialize};
 
 use crypto::sha2::Sha512;
 
@@ -31,9 +32,7 @@ pub struct CookieSession {
 
 fn __create_identifier(request: &ServiceRequest) -> String {
     let mut sha512 = Sha512::new();
-    if let Some(addr) = actix_web::dev::ConnectionInfo::get(request.head(), request.app_config())
-        .realip_remote_addr()
-    {
+    if let Some(addr) = request.connection_info().realip_remote_addr() {
         if let Some(ip) = addr.split(":").next() {
             sha512.input_str(ip);
         };
@@ -48,9 +47,7 @@ fn __create_identifier(request: &ServiceRequest) -> String {
 
 fn _create_identifier(request: &HttpRequest) -> String {
     let mut sha512 = Sha512::new();
-    if let Some(addr) = actix_web::dev::ConnectionInfo::get(request.head(), request.app_config())
-        .realip_remote_addr()
-    {
+    if let Some(addr) = request.connection_info().realip_remote_addr() {
         if let Some(ip) = addr.split(":").next() {
             sha512.input_str(ip);
         };
@@ -142,9 +139,7 @@ impl DecodeRequest for CookieSession {
             Some(LoginInfo {
                 key_str,
                 state: LoginState::Login | LoginState::Update,
-            }) => {
-                key_str.clone()
-            }
+            }) => key_str.clone(),
             Some(LoginInfo {
                 state: LoginState::Logout,
                 ..
@@ -162,7 +157,7 @@ impl DecodeRequest for CookieSession {
             user_id: key,
         };
 
-        let value = serde_json::to_string(&session).map_err(|_| ())?;
+        let value = serde_json::to_string(&session).map_err(|_| "").unwrap();
 
         let mut cookie = Cookie::new(self.name.clone(), value);
 
@@ -187,11 +182,12 @@ impl DecodeRequest for CookieSession {
         }
 
         let mut jar = CookieJar::new();
-
-        jar.private(&self.key).add(cookie);
+        jar.private_mut(&self.key).add(cookie);
 
         for cookie in jar.delta() {
-            let val = HeaderValue::from_str(&cookie.encoded().to_string()).map_err(|_| ())?;
+            let val = HeaderValue::from_str(&cookie.encoded().to_string())
+                .map_err(|_| ())
+                .unwrap();
             res.headers_mut().append(SET_COOKIE, val);
         }
 

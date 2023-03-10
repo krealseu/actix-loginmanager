@@ -94,6 +94,7 @@ mod user;
 pub use crate::cooke_session::CookieSession;
 pub use crate::loginmanager::{DecodeRequest, LoginInfo, LoginManager, LoginState};
 pub use crate::user::{UserMinix, UserWrap, UserWrapAuth};
+use actix_web::HttpMessage;
 pub use loginmanager_codegen::login_required;
 
 /// The method of user login
