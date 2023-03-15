@@ -1,4 +1,4 @@
-use actix_web::dev::{Service, Transform};
+use actix_web::dev::{forward_ready, Service, Transform};
 use actix_web::HttpMessage;
 use actix_web::{
     dev::{ServiceRequest, ServiceResponse},
@@ -13,7 +13,6 @@ use futures::{
 };
 use std::pin::Pin;
 use std::rc::Rc;
-use std::task::{Context, Poll};
 
 pub trait DecodeRequest: Sized {
     fn decode(&self, req: &ServiceRequest) -> Option<String>;
@@ -123,11 +122,9 @@ where
 {
     type Response = ServiceResponse<B>;
     type Error = Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>+'static>>;
 
-    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
-    }
+    forward_ready!(service);
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let inner = self.inner.clone();

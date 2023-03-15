@@ -1,5 +1,4 @@
-use actix_http::http::HeaderValue;
-use actix_web::http::{header, header::SET_COOKIE};
+use actix_web::http::{header::{HeaderValue, self, SET_COOKIE}};
 use actix_web::HttpMessage;
 use actix_web::{
     dev::{ServiceRequest, ServiceResponse},

@@ -1,12 +1,9 @@
-use actix_web::{
-    web::{self, get},
-    App, HttpRequest, HttpResponse, HttpServer, Responder,
-};
-
+use std::pin::Pin;
+use actix_web::{get, web, App, HttpRequest, HttpResponse, HttpServer};
 use actix_loginmanager as loginmanager;
 use loginmanager::{CookieSession, LoginManager, UserMinix, UserWrap};
 
-use futures::{future, future::Ready};
+use futures::Future;
 use loginmanager_codegen::login_required;
 
 #[derive(Clone)]
@@ -15,38 +12,53 @@ struct User {
     name: &'static str,
 }
 
+// impl UserMinix for User {
+//     type Future = Ready<Option<Self>>;
+//     type Key = i32;
+//     fn get_user(i: &Self::Key, _: &HttpRequest) -> Self::Future {
+//         for index in 0..USERS.len() {
+//             if &USERS[index].id == i {
+//                 return future::ready(Some(USERS[index].clone()));
+//             }
+//         }
+//         future::ready(None)
+//     }
+
+//     fn get_id(&self) -> &Self::Key {
+//         &self.id
+//     }
+// }
+
 impl UserMinix for User {
-    type Future = Ready<Option<Self>>;
+    type Future = Pin<Box<dyn Future<Output = Option<Self>>>>;
     type Key = i32;
-    fn get_user(i: &i32, _: &HttpRequest) -> Self::Future {
-        for index in 0..USERS.len() {
-            if &USERS[index].id == i {
-                return future::ready(Some(USERS[index].clone()));
+    fn get_user(i: &Self::Key, _: &HttpRequest) -> Self::Future {
+        // let req = req.clone();
+        let i = i.clone();
+        Box::pin(async move {
+            for id in 0..USERS.len() {
+                if USERS[id].id == i {
+                    return Some(USERS[id].clone());
+                }
             }
-        }
-        future::ready(None)
+            None
+        })
     }
 
-    fn get_id(&self) -> i32 {
-        self.id
+    fn get_id(&self) -> &Self::Key {
+        &self.id
     }
 }
 
 const USERS: [User; 3] = [
     User { id: 1, name: "Tom" },
-    User {
-        id: 2,
-        name: "Jerry",
-    },
-    User {
-        id: 3,
-        name: "Spike",
-    },
+    User { id: 2, name: "Jerry",},
+    User { id: 3, name: "Spike",},
 ];
 
 #[login_required(User)]
 async fn hello() -> impl actix_web::Responder {
-    return "hello";
+    return format!("hello {}",user.name);
 }
 
 async fn auto_login(req: HttpRequest) -> impl actix_web::Responder {
@@ -60,6 +72,7 @@ async fn logout(req: HttpRequest, UserWrap(user): UserWrap<User>) -> impl actix_
     HttpResponse::Ok().body(format!("logout:{:?} ", user.name))
 }
 
+#[get("/")]
 async fn index(UserWrap(user): UserWrap<User>) -> impl actix_web::Responder {
     HttpResponse::Ok().body(format!(
         "Hello:{:?} is_authenticated:{}",
@@ -68,7 +81,7 @@ async fn index(UserWrap(user): UserWrap<User>) -> impl actix_web::Responder {
     ))
 }
 
-#[tokio::main]
+#[actix_web::main]
 #[test]
 async fn main() {
     HttpServer::new(|| {
@@ -76,7 +89,11 @@ async fn main() {
             .wrap(LoginManager::new(
                 CookieSession::new(&[0; 32]).secure(false),
             ))
-            .route("/", web::get().to(index))
+            .service(
+                web::scope("path")
+                    .service(index)
+            )
+            .service(index)
             .route("/hello", web::get().to(hello))
             .route("/login", web::get().to(auto_login))
             .route("/logout", web::get().to(logout))

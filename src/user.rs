@@ -1,8 +1,8 @@
 use crate::loginmanager::LoginInfo;
-use actix_http::http::StatusCode;
-use actix_web::HttpMessage;
-use actix_web::error::InternalError;
-use actix_web::{dev::Payload, Error, FromRequest, HttpRequest};
+use actix_web::{
+    dev::Payload, error::InternalError, http::StatusCode, Error, FromRequest, HttpMessage,
+    HttpRequest,
+};
 use futures::Future;
 use serde::{de::DeserializeOwned, Serialize};
 use std::pin::Pin;
@@ -10,6 +10,10 @@ use std::rc::Rc;
 /// the base user trait
 /// ### Example: Get user from database
 /// ```rust
+/// # use actix_web::{HttpRequest,Data};
+/// # use futures::Future;
+/// # use std::pin::Pin;
+/// # use sqlx;
 /// type Pool = sqlx::SqlitePool;
 ///
 /// #[derive(Serialize, Deserialize)]
@@ -48,7 +52,7 @@ pub trait UserMinix: Sized {
     fn get_user(id: &Self::Key, req: &HttpRequest) -> Self::Future;
 
     /// Return the User id
-    fn get_id(&self) -> Self::Key;
+    fn get_id(&self) -> &Self::Key;
 
     /// return user's actual authentication status, default True.
     fn is_authenticated(&self) -> bool {
@@ -62,7 +66,9 @@ pub trait UserMinix: Sized {
 }
 
 /// The wrap of user Instance. It implements `FromRequest` trait.  
+///
 /// It will return `401 Unauthorized` if no key or error key.  
+///
 /// If loginmanager set redirect true,then will rediret login_view.
 /// ```rust
 /// #[get("/index")]
@@ -173,7 +179,9 @@ where
             if user.is_actived() && user.is_authenticated() {
                 return Ok(userwrapauth);
             } else {
-                return Err(InternalError::new("No authentication.", StatusCode::UNAUTHORIZED).into());
+                return Err(
+                    InternalError::new("No authentication.", StatusCode::UNAUTHORIZED).into(),
+                );
             }
         })
     }
